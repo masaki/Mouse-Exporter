@@ -4,7 +4,10 @@ use 5.008_001;
 use strict;
 use warnings;
 use Mouse ();
-use Data::Util ();
+use Data::Util qw(
+    get_code_ref get_code_info
+    install_subroutine uninstall_subroutine
+);
 
 our $VERSION = '0.01';
 
@@ -27,17 +30,22 @@ sub setup_import_methods {
 sub build_import_methods {
     my ($class, %args) = @_;
 
-    my $caller = $args{exporting_package} || caller;
-    my (%exports, %unimports);
+    my $caller = $args{exporting_package} ||= caller;
+    my ($exports, $is_removable) = $class->_build_keywords(%args);
+
+    my $import   = $class->_make_import_sub($exports);
+    my $unimport = $class->_make_unimport_sub($is_removable);
+
+    return ($import, $unimport);
+}
+
+sub _build_keywords {
+    my ($class, %args) = @_;
+    my (%exports, %is_removable);
 
     for my $name (@{ $args{with_caller} || [] }) {
-        my $code = do {
-            no strict 'refs';
-            \&{ $caller . '::' . $name };
-        };
-
-        $exports{$name} = $code;
-        $unimports{$name}++;
+        $exports{$name} = get_code_ref($args{exporting_package}, $name);
+        $is_removable{$name}++;
     }
 
     for my $name (@{ $args{as_is} || [] }) {
@@ -45,48 +53,62 @@ sub build_import_methods {
 
         if (ref $name) {
             $code = $name;
-
-            my $package;
-            ($package, $name) = Data::Util::get_code_info($name);
-
-            $unimports{$name}++ if $package eq $caller;
+            (my $package, $name) = get_code_info($code);
+            $is_removable{$name}++ if $package eq $args{exporting_package};
         }
         else {
-            $code = do {
-                no strict 'refs';
-                \&{ $caller . '::' . $name };
-            };
-
-            $unimports{$name}++;
+            $code = get_code_ref($args{exporting_package}, $name);
+            $is_removable{$name}++;
         }
 
         $exports{$name} = $code;
     }
 
-    my @packages = ref $args{also} ? @{ $args{also} } : ($args{also});
+    if (exists $args{also}) {
+        my @also = ref $args{also} ? @{ $args{also} } : ($args{also});
 
-    return $class->_make_import_methods(
-        exports   => \%exports,
-        unimports => \%unimports,
-        packages  => \@packages,
-    );
+        no strict 'refs';
+        for my $package (@also) {
+            Mouse::load_class($package);
+            next unless my @export = @{ $package . '::EXPORT' };
+            for my $name (@export) {
+                $exports{$name} = get_code_ref($package, $name);
+                $is_removable{$name}++;
+            }
+        }
+    }
+
+    return (\%exports, \%is_removable);
 }
 
-sub _make_import_methods {
-    my ($class, %args) = @_;
+sub _make_import_sub {
+    my ($class, $exports) = @_;
 
-    my $import = sub {
+    return sub {
+        my $class = shift;
+
         strict->import;
         warnings->import;
 
-        # TODO: not implemented yet
-    };
+        my $opts = (ref $_[0] && ref $_[0] eq 'HASH') ? shift : {};
+        my $caller = exists $opts->{into} ? $opts->{into} : caller($opts->{into_level} || 0);
 
-    my $unimport = sub {
-        # TODO: not implemented yet
-    };
+        if ($caller eq 'main') {
+            warn qq{$class does not export its sugar to the 'main' package.\n};
+            return;
+        }
 
-    return ($import, $unimport);
+        install_subroutine($caller, %$exports);
+    };
+}
+
+sub _make_unimport_sub {
+    my ($class, $is_removable) = @_;
+
+    return sub {
+        my $caller = caller;
+        uninstall_subroutine($caller, keys %$is_removable);
+    };
 }
 
 1;

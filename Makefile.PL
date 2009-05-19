@@ -2,7 +2,7 @@ use inc::Module::Install;
 name 'Mouse-Exporter';
 all_from 'lib/Mouse/Exporter.pm';
 
-requires 'Mouse';
+requires 'Mouse' => '0.22';
 requires 'Data::Util';
 
 tests 't/*.t';

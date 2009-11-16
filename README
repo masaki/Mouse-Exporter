@@ -1,3 +1,10 @@
+!!!!!!!!!!!!!!!!!!
+!!! DEPRECATED !!!
+!!!!!!!!!!!!!!!!!!
+
+SEE Mouse 0.39 or higher version - http://search.cpan.org/perldoc?Mouse
+
+----------------------------------------------------------------------------
 This is Perl module Mouse::Exporter.
 
 INSTALLATION
